@@ -6,7 +6,7 @@ dist
 .DS_store
 .env
 _index.mjs
-_temp
+_temp/*
 cert/*
 
 # Swap

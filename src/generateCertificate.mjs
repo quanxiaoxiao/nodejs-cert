@@ -7,6 +7,7 @@ import {
 } from 'node:fs';
 import { resolve } from 'node:path';
 
+import generateKey from './generateKey.mjs';
 import genereateIssuers from './genereateIssuers.mjs';
 
 export default ({
@@ -30,8 +31,8 @@ export default ({
   }
 
   if (!existsSync(keyPathname)) {
-    console.log(`generateCertificate fail, cert key \`${keyPathname}\` not exist`);
-    process.exit(1);
+    console.log(`will genenrate key \`${keyPathname}\``);
+    generateKey(keyPathname);
   }
 
   const certReqPathname = resolve(process.cwd(), `${randomBytes(12).toString('hex')}.csr`);
