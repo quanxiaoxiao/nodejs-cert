@@ -1,9 +1,9 @@
+import generateCertificate from './generateCertificate.mjs';
 import generateKey from './generateKey.mjs';
 import generateRootCert from './generateRootCert.mjs';
-import generateCertificate from './generateCertificate.mjs';
 
 export {
+  generateCertificate,
   generateKey,
   generateRootCert,
-  generateCertificate,
 };

@@ -1,5 +1,5 @@
-import { existsSync, writeFileSync } from 'node:fs';
 import { generateKeyPairSync } from 'node:crypto';
+import { existsSync, writeFileSync } from 'node:fs';
 
 export default (pathname, modulusLength = 2048) => {
   if (existsSync(pathname)) {

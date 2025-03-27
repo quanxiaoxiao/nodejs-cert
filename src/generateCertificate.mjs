@@ -1,11 +1,12 @@
-import { resolve } from 'node:path';
-import {
-  writeFileSync,
-  unlinkSync,
-  existsSync,
-} from 'node:fs';
-import { randomBytes } from 'node:crypto';
 import { execSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import {
+  existsSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { resolve } from 'node:path';
+
 import genereateIssuers from './genereateIssuers.mjs';
 
 export default ({
