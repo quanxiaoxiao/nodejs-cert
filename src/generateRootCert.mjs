@@ -3,25 +3,48 @@ import { existsSync } from 'node:fs';
 
 import generateIssuers from './generateIssuers.mjs';
 
+const checkFileExistence = ({
+  rootCAKeyPathname,
+  rootCACertPathname,
+  configPathname,
+}) => {
+  if (existsSync(rootCACertPathname)) {
+    throw new Error(`root cert \`${rootCACertPathname}\` already exist`);
+  }
+
+  if (!existsSync(rootCAKeyPathname)) {
+    throw new Error(`key \`${rootCAKeyPathname}\` not found`);
+  }
+
+  if (configPathname && !existsSync(configPathname)) {
+    throw new Error(`config file \`${configPathname}\` not found`);
+  }
+};
+
 export default ({
-  dayCount,
+  dayCount = 365,
   issuers,
   rootCAKeyPathname,
   rootCACertPathname,
   configPathname,
   requestExtName,
 }) => {
-  if (existsSync(rootCACertPathname)) {
-    console.log(`generateRootCert fail, \`${rootCACertPathname}\` already exist`);
-    process.exit(1);
+  try {
+    checkFileExistence({
+      rootCAKeyPathname,
+      rootCACertPathname,
+      configPathname,
+    });
+  } catch (error) {
+    console.error(`❌ Failed to generate private key: ${error.message}`);
+    return false;
   }
-  if (!existsSync(rootCAKeyPathname)) {
-    console.log(`generateRootCert fail, \`${rootCACertPathname}\` is not exist`);
-    process.exit(1);
+
+  if (dayCount == null || dayCount <= 0) {
+    console.error('❌ dayCount must be a positive number');
+    return false;
   }
-  if (configPathname && !existsSync(configPathname)) {
-    console.log(`generateRootCert fail, \`${configPathname}\` is not exist`);
-  }
+
   const command = [
     'openssl',
     'req',
@@ -44,8 +67,11 @@ export default ({
     command.push(`-reqexts ${requestExtName}`);
   }
 
-  execSync(command.join(' '));
-  if (existsSync(rootCACertPathname)) {
-    console.log(`\`${rootCACertPathname}\` generateRootCert success`);
+  execSync(command.join(' '), { stdio: 'pipe' });
+  if (!existsSync(rootCACertPathname)) {
+    console.error(`❌ Failed to generate Root Certificate: ${rootCACertPathname}`);
+    return false;
   }
+  console.log(`✅ Root Certificate generated successfully: ${rootCACertPathname}`);
+  return true;
 };
