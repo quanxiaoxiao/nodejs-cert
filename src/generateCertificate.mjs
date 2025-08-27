@@ -88,6 +88,13 @@ const generateCertRequest = (keyPathname, issuers) => {
 const generateExtensionFile = ({ dnsList, ipList, uriList }) => {
   const extFilePathname = resolve(process.cwd(), `${randomBytes(12).toString('hex')}.conf`);
 
+  const extContentList = [
+    'authorityKeyIdentifier=keyid,issuer',
+    'basicConstraints=CA:FALSE',
+    'keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment',
+    'extendedKeyUsage = serverAuth, clientAuth, codeSigning, emailProtection',
+  ];
+
   try {
     const dnsEntries = (dnsList || [])
       .filter(dns => dns && typeof dns === 'string')
@@ -101,25 +108,25 @@ const generateExtensionFile = ({ dnsList, ipList, uriList }) => {
       .filter(uri=> uri && typeof uri === 'string')
       .map((uri, i) => `URI.${i + 1} = ${uri.trim()}`);
 
-    if (dnsEntries.length === 0
-      && ipEntries.length === 0
-      && uriEntires.length === 0
+    if (dnsEntries.length !== 0
+      || ipEntries.length !== 0
+      || uriEntires.length !== 0
     ) {
-      return null;
+      extContentList.push('subjectAltName = @alt_names');
+      extContentList.push('');
+      extContentList.push('[alt_names]');
+      if (dnsEntries.length > 0) {
+        extContentList.push(...dnsEntries);
+      }
+      if (ipEntries.length > 0) {
+        extContentList.push(...ipEntries);
+      }
+      if (uriEntires.length > 0) {
+        extContentList.push(...uriEntires);
+      }
     }
 
-    const extFileContent = [
-      'authorityKeyIdentifier=keyid,issuer',
-      'basicConstraints=CA:FALSE',
-      'keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment',
-      'extendedKeyUsage = serverAuth, clientAuth, codeSigning, emailProtection',
-      'subjectAltName = @alt_names',
-      '',
-      '[alt_names]',
-      ...dnsEntries,
-      ...ipEntries,
-      ...uriEntires,
-    ].join('\n');
+    const extFileContent = extContentList.join('\n');
 
     writeFileSync(extFilePathname, extFileContent, 'utf8');
     return extFilePathname;
@@ -200,7 +207,8 @@ export default (input) => {
   }
 
   let certReqPathname = null;
-  let extFilePathname = null;
+
+  let extFilePathname;
 
   try {
     certReqPathname = generateCertRequest(keyPathname, issuers);
@@ -208,13 +216,7 @@ export default (input) => {
       throw new Error('Failed to generate certificate request');
     }
 
-    const needsExtension = (Array.isArray(dnsList) && dnsList.length > 0)
-      || (Array.isArray(ipList) && ipList.length > 0)
-      || (Array.isArray(uriList) && uriList.length > 0);
-
-    if (needsExtension) {
-      extFilePathname = generateExtensionFile({ dnsList, ipList, uriList });
-    }
+    extFilePathname = generateExtensionFile({ dnsList, ipList, uriList });
 
     const success = generateCert({
       certReqPathname,

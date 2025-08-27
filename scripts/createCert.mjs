@@ -30,7 +30,7 @@ const issuers = {
 };
 const dnsList = [];
 const ipList = [];
-const uriList = ['taxi1', 'quan'];
+const uriList = [];
 const dayCount = 356 * 5;
 
 generateCertificate({
