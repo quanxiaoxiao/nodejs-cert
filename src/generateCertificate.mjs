@@ -7,64 +7,107 @@ import {
 } from 'node:fs';
 import { resolve } from 'node:path';
 
+import generateIssuers from './generateIssuers.mjs';
 import generateKey from './generateKey.mjs';
-import genereateIssuers from './genereateIssuers.mjs';
 
-export default ({
+const validateInputs = ({
   dayCount,
   issuers,
-  dnsList,
-  ipList,
   rootCAKeyPathname,
   rootCACertPathname,
   keyPathname,
   certPathname,
 }) => {
+  const requiredFields = [
+    { field: dayCount, name: 'dayCount', type: 'number' },
+    { field: issuers, name: 'issuers', type: 'object' },
+    { field: rootCAKeyPathname, name: 'rootCAKeyPathname', type: 'string' },
+    { field: rootCACertPathname, name: 'rootCACertPathname', type: 'string' },
+    { field: keyPathname, name: 'keyPathname', type: 'string' },
+    { field: certPathname, name: 'certPathname', type: 'string' },
+  ];
+
+  for (const { field, name, type } of requiredFields) {
+    if (typeof field !== type || (type === 'string' && !field.trim())) {
+      console.error(`❌ Invalid ${name}: expected ${type}, got ${typeof field}`);
+      return false;
+    }
+  }
+
+  if (dayCount <= 0) {
+    console.error('❌ dayCount must be a positive number');
+    return false;
+  }
+
+  return true;
+};
+
+const checkRootCertFiles = (rootCACertPathname, rootCAKeyPathname) => {
   if (!existsSync(rootCACertPathname)) {
-    console.log(`generateCertificate fail, root cert \`${rootCACertPathname}\` not exist`);
-    process.exit(1);
+    console.error(`❌ Root certificate not found: ${rootCACertPathname}`);
+    return false;
   }
 
   if (!existsSync(rootCAKeyPathname)) {
-    console.log(`generateCertificate fail, root cert key \`${rootCACertPathname}\` not exist`);
-    process.exit(1);
+    console.error(`❌ Root certificate key not found: ${rootCAKeyPathname}`);
+    return false;
   }
 
-  if (!existsSync(keyPathname)) {
-    console.log(`will genenrate key \`${keyPathname}\``);
-    generateKey(keyPathname);
-  }
+  return true;
+};
 
+const generateCertRequest = (keyPathname, issuers) => {
   const certReqPathname = resolve(process.cwd(), `${randomBytes(12).toString('hex')}.csr`);
-  const commandWithCreateCertReq = [
-    'openssl',
-    'req',
-    '-new',
-    `-key "${keyPathname}"`,
-    `-subj "${genereateIssuers(issuers)}"`,
-    `-out ${certReqPathname}`,
-  ].join(' ');
 
-  let willSetExt = false;
+  try {
+    const subjectString = generateIssuers(issuers);
 
-  if (Array.isArray(dnsList) && dnsList.length > 0) {
-    willSetExt = true;
+    const command = [
+      'openssl', 'req', '-new',
+      '-key', keyPathname,
+      '-subj', `"${subjectString}"`,
+      '-out', certReqPathname,
+    ];
+
+    execSync(command.join(' '), { stdio: 'pipe' });
+
+    if (!existsSync(certReqPathname)) {
+      throw new Error(`Certificate request file was not created: ${certReqPathname}`);
+    }
+
+    return certReqPathname;
+  } catch (error) {
+    console.error(`❌ Failed to create certificate request: ${error.message}`);
+    if (existsSync(certReqPathname)) {
+      unlinkSync(certReqPathname);
+    }
+    return null;
   }
+};
 
-  if (!willSetExt && Array.isArray(ipList) && ipList.length > 0) {
-    willSetExt = true;
-  }
-
-  execSync(commandWithCreateCertReq);
-
-  if (!existsSync(certReqPathname)) {
-    console.log(`generateCertificate fail, cert req \`${certReqPathname}\` not exist`);
-    process.eixt(1);
-  }
-
+const generateExtensionFile = ({ dnsList, ipList, uriList }) => {
   const extFilePathname = resolve(process.cwd(), `${randomBytes(12).toString('hex')}.conf`);
 
-  if (willSetExt) {
+  try {
+    const dnsEntries = (dnsList || [])
+      .filter(dns => dns && typeof dns === 'string')
+      .map((dns, i) => `DNS.${i + 1} = ${dns.trim()}`);
+
+    const ipEntries = (ipList || [])
+      .filter(ip => ip && typeof ip === 'string')
+      .map((ip, i) => `IP.${i + 1} = ${ip.trim()}`);
+
+    const uriEntires = (uriList || [])
+      .filter(uri=> uri && typeof uri === 'string')
+      .map((uri, i) => `URI.${i + 1} = ${uri.trim()}`);
+
+    if (dnsEntries.length === 0
+      && ipEntries.length === 0
+      && uriEntires.length === 0
+    ) {
+      return null;
+    }
+
     const extFileContent = [
       'authorityKeyIdentifier=keyid,issuer',
       'basicConstraints=CA:FALSE',
@@ -73,33 +116,126 @@ export default ({
       'subjectAltName = @alt_names',
       '',
       '[alt_names]',
-      ...(dnsList || []).map((s, i) => `DNS.${i + 1} = ${s}`),
-      ...(ipList || []).map((s, i) => `IP.${i + 1} = ${s}`),
+      ...dnsEntries,
+      ...ipEntries,
+      ...uriEntires,
     ].join('\n');
 
-    writeFileSync(extFilePathname, extFileContent);
+    writeFileSync(extFilePathname, extFileContent, 'utf8');
+    return extFilePathname;
+  } catch (error) {
+    console.error(`❌ Failed to create extension file: ${error.message}`);
+    if (existsSync(extFilePathname)) {
+      unlinkSync(extFilePathname);
+    }
+    return null;
+  }
+};
+
+const cleanupTempFiles = (filenames) => {
+  for (const filename of filenames) {
+    if (filename && existsSync(filename)) {
+      try {
+        unlinkSync(filename);
+      } catch (error) {
+        console.warn(`⚠️  Failed to cleanup temporary file ${filename}: ${error.message}`);
+      }
+    }
+  }
+};
+
+const generateCert = ({
+  certReqPathname,
+  rootCACertPathname,
+  rootCAKeyPathname,
+  dayCount,
+  certPathname,
+  extFilePathname,
+}) => {
+  try {
+    const command = [
+      'openssl', 'x509', '-req',
+      '-in', certReqPathname,
+      '-CA', rootCACertPathname,
+      '-CAkey', rootCAKeyPathname,
+      '-days', dayCount.toString(),
+      '-sha256',
+      '-out', certPathname,
+      '-CAcreateserial',
+    ];
+
+    if (extFilePathname) {
+      command.push('-extfile', extFilePathname);
+    }
+
+    execSync(command.join(' '), { stdio: 'pipe' });
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to generate certificate: ${error.message}`);
+    return false;
+  }
+};
+
+export default (input) => {
+  if (!validateInputs(input)) {
+    return false;
+  }
+  const {
+    dayCount,
+    issuers,
+    dnsList,
+    ipList,
+    uriList,
+    rootCAKeyPathname,
+    rootCACertPathname,
+    keyPathname,
+    certPathname,
+  } = input;
+  if (!checkRootCertFiles(rootCACertPathname, rootCAKeyPathname)) {
+    return false;
   }
 
-  const commandWithCreateCert = [
-    'openssl',
-    'x509',
-    '-req',
-    `-in ${certReqPathname}`,
-    `-CA ${rootCACertPathname}`,
-    `-CAkey ${rootCAKeyPathname}`,
-    `-days ${dayCount}`,
-    '-sha256',
-    `-out ${certPathname}`,
-    ...willSetExt ? [`-extfile ${extFilePathname}`] : [],
-  ].join(' ');
-
-  execSync(commandWithCreateCert);
-
-  if (willSetExt) {
-    unlinkSync(extFilePathname);
+  if (!generateKey(keyPathname)) {
+    return false;
   }
-  unlinkSync(certReqPathname);
-  if (existsSync(certPathname)) {
-    console.log(`\`${certPathname}\` generateCertificate success`);
+
+  let certReqPathname = null;
+  let extFilePathname = null;
+
+  try {
+    certReqPathname = generateCertRequest(keyPathname, issuers);
+    if (!certReqPathname) {
+      throw new Error('Failed to generate certificate request');
+    }
+
+    const needsExtension = (Array.isArray(dnsList) && dnsList.length > 0)
+      || (Array.isArray(ipList) && ipList.length > 0)
+      || (Array.isArray(uriList) && uriList.length > 0);
+
+    if (needsExtension) {
+      extFilePathname = generateExtensionFile({ dnsList, ipList, uriList });
+    }
+
+    const success = generateCert({
+      certReqPathname,
+      rootCACertPathname,
+      rootCAKeyPathname,
+      dayCount,
+      certPathname,
+      extFilePathname,
+    });
+
+    if (success && existsSync(certPathname)) {
+      console.log(`✅ Certificate generated successfully: ${certPathname}`);
+      return true;
+    }
+    console.error(`❌ Failed to generate certificate: ${certPathname}`);
+    return false;
+
+  } catch (error) {
+    console.error(`❌ Certificate generation failed: ${error.message}`);
+    return false;
+  } finally {
+    cleanupTempFiles([certReqPathname, extFilePathname]);
   }
 };

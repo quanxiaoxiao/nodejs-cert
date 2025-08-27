@@ -1,11 +1,12 @@
 import assert from 'node:assert';
-import { X509Certificate } from 'node:crypto';
+import { randomBytes,X509Certificate } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
 import generateCertificate from '../src/generateCertificate.mjs';
 
+const keyPathname = path.resolve(process.cwd(), '_temp', `Quan_${randomBytes(16).toString('hex')}.key`);
 const rootCAKeyPathname = path.resolve(process.cwd(), 'cert', 'RootCA.key');
 const rootCACertPathname = path.resolve(process.cwd(), 'cert', 'RootCA.pem');
 
@@ -28,16 +29,18 @@ const issuers = {
   commonName: 'quan.dev',
 };
 const dnsList = [];
-const ipList = ['127.0.0.1'];
+const ipList = [];
+const uriList = ['taxi1', 'quan'];
 const dayCount = 356 * 5;
 
 generateCertificate({
   issuers,
   dnsList,
   ipList,
+  uriList,
   dayCount,
   rootCAKeyPathname,
   rootCACertPathname,
-  keyPathname: path.resolve(process.cwd(), '_temp', 'quan.key'),
-  certPathname: path.resolve(process.cwd(), '_temp', 'quan.pem'),
+  keyPathname,
+  certPathname: keyPathname.replace(/\.key$/, '.pem'),
 });
